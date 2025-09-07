@@ -9,7 +9,7 @@ import sqlite3
 import pandas as pd
 import operator
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",google_api_key="AIzaSyAF7GLh3dlDk5-3qf5A6eA8njkbGw0WVug")  
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",google_api_key="")  
 
 class GOOGLESHEETS:
     
