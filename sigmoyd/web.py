@@ -39,7 +39,7 @@ class WEB_SEARCH:
         # Initialize two distinct LLM instances as class members
         # Parser LLM for structured data extraction (low temperature)
         self.parser_llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.5-flash-lite",
             google_api_key=self.api_key,
             temperature=0.0,
             convert_system_message_to_human=True # Helps with some prompt structures
@@ -47,7 +47,7 @@ class WEB_SEARCH:
         
         # Main LLM for synthesis and creative tasks (higher temperature)
         self.main_llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.5-flash",
             google_api_key=self.api_key,
             temperature=0.7,
             convert_system_message_to_human=True
