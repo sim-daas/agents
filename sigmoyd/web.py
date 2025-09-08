@@ -26,14 +26,14 @@ embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # Parser LLM for structured data extraction (low temperature)
 parser_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-lite",
+    model="gemini-2.5-flash-lite",
     google_api_key=google_api_key,
     temperature=0.0,
 )
 
 # Main LLM for synthesis and creative tasks (higher temperature)
 main_llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash-lite",
     google_api_key=google_api_key,
     temperature=0.7,
 )
@@ -378,7 +378,7 @@ if __name__ == "__main__":
     
     # Query 2: Creative, formatted output
     # user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
-    user_input = "search black holes"
+    user_input = "write a blog on ai agents with keywords optimized for SEO"
     
     # Query 3: Summarization
     # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
