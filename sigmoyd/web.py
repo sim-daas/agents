@@ -1,3 +1,5 @@
+import aiohttp
+import asyncio
 import os
 import json
 import time
@@ -157,46 +159,80 @@ class WEB_SEARCH:
         print("   - Ranking complete.")
         return ranked_results
         
-    def _scrape_website_content(self, url: str) -> str:
+    async def _scrape_websites_content_async(self, urls: list) -> tuple:
         """
-        Scrapes the main text content from a given URL, limited to 200 words.
+        Scrapes the main text content from a list of URLs concurrently, limited to 200 words each.
 
         Args:
-            url (str): The URL of the website to scrape.
+            urls (list): List of URLs to scrape.
 
         Returns:
-            str: The extracted text content, or an empty string if scraping fails.
+            tuple: (context_parts, sources_used)
+                   context_parts is a list of extracted text content strings,
+                   sources_used is a list of URLs that were successfully scraped.
         """
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-            # Use a session object for potential connection pooling
-            with requests.Session() as session:
-                response = session.get(url, headers=headers, timeout=5, stream=True)
-                response.raise_for_status()
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
 
-                # Read only a limited amount of content to avoid downloading large files
-                content = response.raw.read(500 * 1024, decode_content=True)
+        async def fetch_and_parse(session, url):
+            """Fetch and parse a single URL"""
+            try:
+                async with session.get(url, timeout=5) as response:
+                    response.raise_for_status()
+                    # Read content with size limit
+                    content = await response.read()
+                    if len(content) > 500 * 1024:  # Limit to 500KB
+                        content = content[:500 * 1024]
 
-            # Use lxml for faster parsing
-            soup = BeautifulSoup(content, 'lxml')
+                # Parse with BeautifulSoup and lxml
+                soup = BeautifulSoup(content, 'lxml')
+                
+                # Remove non-visible elements
+                for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form']):
+                    element.decompose()
 
-            # Remove script, style, and other non-visible elements
-            for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form']):
-                element.decompose()
+                # Extract text
+                text_chunks = [p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'article', 'div'])]
+                full_text = ' '.join(text_chunks).strip()
+                cleaned_text = ' '.join(full_text.split())
 
-            text_chunks = [p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'article', 'div'])]
-            full_text = ' '.join(text_chunks).strip()
+                # Truncate to 200 words
+                words = cleaned_text.split()
+                if len(words) > 200:
+                    extracted_text = ' '.join(words[:200]) + "..."
+                else:
+                    extracted_text = ' '.join(words)
+
+                return url, extracted_text
+
+            except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeDecodeError, AttributeError) as e:
+                print(f"   - Failed to scrape {url}: {str(e)}")
+                return url, ""
+
+        context_parts = []
+        sources_used = []
+
+        # Create aiohttp session and fetch all URLs concurrently
+        timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            # Create tasks for all URLs
+            tasks = [fetch_and_parse(session, url) for url in urls]
             
-            cleaned_text = ' '.join(full_text.split())
+            # Execute all tasks concurrently
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Truncate content to a maximum of 200 words
-            words = cleaned_text.split()
-            if len(words) > 200:
-                return ' '.join(words[:200]) + "..."
+        # Process results
+        for result in results:
+            if isinstance(result, Exception):
+                continue
             
-            return ' '.join(words)
-        except (requests.RequestException, UnicodeDecodeError, AttributeError) as e:            
-            return ""
+            url, content = result
+            if content:  # Only add if content was successfully extracted
+                context_parts.append(f"Content from {url}:\n{content}")
+                sources_used.append(url)
+
+        return context_parts, sources_used
 
     def _invoke_llm(self, original_query: str, context: str, output_format: str) -> str:
         """
@@ -287,18 +323,12 @@ class WEB_SEARCH:
         # 4. Scrape top N results
         step_start_time = time.time()
         print("4. Scraping content from top 3 ranked websites...")
-        context_parts = []
-        sources_used = []
         top_n_to_scrape = 3
-
-        for result in ranked_results[:top_n_to_scrape]:
-            url = result.get('href')
-            if url:
-                print(f"   - Scraping: {url} (Similarity: {result.get('similarity', 0):.4f})")
-                content = self._scrape_website_content(url)
-                if content:
-                    context_parts.append(f"Content from {url}:\n{content}")
-                    sources_used.append(url)
+        urls_to_scrape = [
+            result.get('href') for result in ranked_results[:top_n_to_scrape] if result.get('href')
+        ]
+        
+        context_parts, sources_used = asyncio.run(self._scrape_websites_content_async(urls_to_scrape))
         
         timings['4_scrape_content'] = time.time() - step_start_time
         context = "\n\n---\n\n".join(context_parts)
