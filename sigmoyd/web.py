@@ -347,7 +347,8 @@ if __name__ == "__main__":
     # user_input = "What were the key findings of the latest IPCC report on climate change?"
     
     # Query 2: Creative, formatted output
-    user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
+    # user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
+    user_input = "search black holes"
     
     # Query 3: Summarization
     # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
