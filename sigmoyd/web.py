@@ -4,7 +4,7 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from sentence_transformers import SentenceTransformer, util
 
 from langchain.prompts import PromptTemplate
@@ -27,7 +27,6 @@ parser_llm = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash-lite",
     google_api_key=google_api_key,
     temperature=0.0,
-    convert_system_message_to_human=True
 )
 
 # Main LLM for synthesis and creative tasks (higher temperature)
@@ -35,7 +34,6 @@ main_llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-flash",
     google_api_key=google_api_key,
     temperature=0.7,
-    convert_system_message_to_human=True
 )
 print("Models initialized.")
 
@@ -283,7 +281,7 @@ class WEB_SEARCH:
 
         # 4. Scrape top N results
         step_start_time = time.time()
-        print("4. Scraping content from top 5 ranked websites...")
+        print("4. Scraping content from top 3 ranked websites...")
         context_parts = []
         sources_used = []
         top_n_to_scrape = 3
