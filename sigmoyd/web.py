@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -7,16 +8,37 @@ from duckduckgo_search import DDGS
 from sentence_transformers import SentenceTransformer, util
 
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-# --- Model Initialization ---
-# Initialize models outside the class as requested,
-# so they are loaded only once.
+# --- Model and Environment Initialization ---
+# Load environment variables at the start
+load_dotenv()
+google_api_key = os.getenv("GOOGLE_API_KEY")
+
+if not google_api_key:
+    raise ValueError("GOOGLE_API_KEY not found. Please set it in your .env file.")
+
+# Initialize models outside the class as requested, so they are loaded only once.
+print("Initializing models...")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-# It's generally better practice to initialize these within the class __init__
-# if they depend on instance-specific configs like an API key, but following the prompt.
-# We will pass the api_key to them inside the class.
+
+# Parser LLM for structured data extraction (low temperature)
+parser_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash-lite",
+    google_api_key=google_api_key,
+    temperature=0.0,
+    convert_system_message_to_human=True
+)
+
+# Main LLM for synthesis and creative tasks (higher temperature)
+main_llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
+    google_api_key=google_api_key,
+    temperature=0.7,
+    convert_system_message_to_human=True
+)
+print("Models initialized.")
+
 
 class WEB_SEARCH:
     """
@@ -25,33 +47,12 @@ class WEB_SEARCH:
     and synthesizes a comprehensive answer.
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self):
         """
         Initializes the WEB_SEARCH agent.
-
-        Args:
-            api_key (str): The Google API key for the generative models.
+        Models are loaded in the global scope to be instantiated only once.
         """
-        if not api_key:
-            raise ValueError("API key cannot be empty.")
-        self.api_key = api_key
-        
-        # Initialize two distinct LLM instances as class members
-        # Parser LLM for structured data extraction (low temperature)
-        self.parser_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite",
-            google_api_key=self.api_key,
-            temperature=0.0,
-            convert_system_message_to_human=True # Helps with some prompt structures
-        )
-        
-        # Main LLM for synthesis and creative tasks (higher temperature)
-        self.main_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=self.api_key,
-            temperature=0.7,
-            convert_system_message_to_human=True
-        )
+        pass
 
     def _parse_user_query(self, user_query: str) -> dict:
         """
@@ -73,13 +74,13 @@ class WEB_SEARCH:
         Here are some examples:
 
         User Request: "Find out about the latest advancements in AI and give me a 3-point summary."
-        {"search_query": "latest advancements in artificial intelligence", "output_format": "a 3-point summary"}
+        {{"search_query": "latest advancements in artificial intelligence", "output_format": "a 3-point summary"}}
 
         User Request: "Write a blog post about the benefits of remote work for small businesses."
-        {"search_query": "benefits of remote work for small businesses", "output_format": "a blog post"}
+        {{"search_query": "benefits of remote work for small businesses", "output_format": "a blog post"}}
 
         User Request: "What is the capital of Mongolia?"
-        {"search_query": "capital of Mongolia", "output_format": "a concise answer"}
+        {{"search_query": "capital of Mongolia", "output_format": "a concise answer"}}
 
         Now, parse the following user request:
 
@@ -91,23 +92,23 @@ class WEB_SEARCH:
             input_variables=['user_query']
         )
         
-        llm_chain = LLMChain(prompt=parser_prompt, llm=self.parser_llm)
+        # Uses the global parser_llm
+        llm_chain = parser_prompt | parser_llm
         
         try:
             llm_response = llm_chain.invoke({'user_query': user_query})
-            # Clean up the response string in case of markdown code blocks
-            cleaned_response = llm_response['text'].strip().replace('```json', '').replace('```', '').strip()
+            cleaned_response = llm_response.content.strip().replace('```json', '').replace('```', '').strip()
             parsed_json = json.loads(cleaned_response)
             print(f"   - Successfully parsed query: {parsed_json}")
             return parsed_json
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, AttributeError) as e:
             print(f"   - Warning: Failed to parse LLM response ({e}). Using default.")
             return {
                 'search_query': user_query,
                 'output_format': 'a concise summary'
             }
 
-    def _fetch_search_results(self, search_query: str, max_results: int = 20) -> list:
+    def _fetch_search_results(self, search_query: str, max_results: int = 5) -> list:
         """
         Fetches web search results using DuckDuckGo.
 
@@ -147,23 +148,20 @@ class WEB_SEARCH:
         query_embedding = embedding_model.encode(search_query, convert_to_tensor=True)
         result_titles = [result.get('title', '') for result in results]
         
-        # Encode all titles in a single batch for efficiency
         title_embeddings = embedding_model.encode(result_titles, convert_to_tensor=True)
         
-        # Calculate cosine similarity
         cosine_scores = util.cos_sim(query_embedding, title_embeddings)
         
         for i, result in enumerate(results):
             result['similarity'] = cosine_scores[0][i].item()
             
-        # Sort results by similarity score in descending order
         ranked_results = sorted(results, key=lambda x: x.get('similarity', 0), reverse=True)
         print("   - Ranking complete.")
         return ranked_results
         
     def _scrape_website_content(self, url: str) -> str:
         """
-        Scrapes the main text content from a given URL.
+        Scrapes the main text content from a given URL, limited to 200 words.
 
         Args:
             url (str): The URL of the website to scrape.
@@ -176,25 +174,25 @@ class WEB_SEARCH:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
             response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status() # Raise an exception for bad status codes
+            response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Remove script and style elements
             for script_or_style in soup(['script', 'style', 'nav', 'footer', 'header']):
                 script_or_style.decompose()
 
-            # A simple heuristic: get text from main content tags
             text_chunks = [p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'article', 'div'])]
             full_text = ' '.join(text_chunks).strip()
             
-            # Clean up whitespace
             cleaned_text = ' '.join(full_text.split())
+
+            # Truncate content to a maximum of 200 words
+            words = cleaned_text.split()
+            if len(words) > 200:
+                return ' '.join(words[:200]) + "..."
             
             return cleaned_text
         except (requests.RequestException, Exception) as e:
-            # Silently fail for individual sites, log the error for debugging
-            # print(f"   - Could not scrape {url}: {e}")
             return ""
 
     def _invoke_llm(self, original_query: str, context: str, output_format: str) -> str:
@@ -233,7 +231,8 @@ class WEB_SEARCH:
             input_variables=['original_query', 'context', 'output_format']
         )
 
-        main_chain = LLMChain(prompt=main_prompt, llm=self.main_llm)
+        # Uses the global main_llm
+        main_chain = main_prompt | main_llm
         
         response = main_chain.invoke({
             'original_query': original_query,
@@ -242,7 +241,7 @@ class WEB_SEARCH:
         })
         
         print("   - Synthesis complete.")
-        return response['text']
+        return response.content
 
     def ALL_Action(self, user_query: str) -> dict:
         """
@@ -255,8 +254,14 @@ class WEB_SEARCH:
         Returns:
             dict: A structured dictionary containing the final response and metadata.
         """
+        total_start_time = time.time()
+        timings = {}
+
         # 1. Parse the user query
+        step_start_time = time.time()
         parsed_query_dict = self._parse_user_query(user_query)
+        timings['1_parse_query'] = time.time() - step_start_time
+
         if not parsed_query_dict or 'search_query' not in parsed_query_dict:
             return {
                 "error": "Failed to parse the user query.",
@@ -267,16 +272,21 @@ class WEB_SEARCH:
         output_format = parsed_query_dict['output_format']
 
         # 2. Fetch search results
+        step_start_time = time.time()
         results = self._fetch_search_results(search_query)
+        timings['2_fetch_results'] = time.time() - step_start_time
 
         # 3. Rank results
+        step_start_time = time.time()
         ranked_results = self._rank_results_by_similarity(search_query, results)
+        timings['3_rank_results'] = time.time() - step_start_time
 
         # 4. Scrape top N results
+        step_start_time = time.time()
         print("4. Scraping content from top 5 ranked websites...")
         context_parts = []
         sources_used = []
-        top_n_to_scrape = 5
+        top_n_to_scrape = 3
 
         for result in ranked_results[:top_n_to_scrape]:
             url = result.get('href')
@@ -284,9 +294,10 @@ class WEB_SEARCH:
                 print(f"   - Scraping: {url} (Similarity: {result.get('similarity', 0):.4f})")
                 content = self._scrape_website_content(url)
                 if content:
-                    context_parts.append(content)
+                    context_parts.append(f"Content from {url}:\n{content}")
                     sources_used.append(url)
         
+        timings['4_scrape_content'] = time.time() - step_start_time
         context = "\n\n---\n\n".join(context_parts)
         
         if not context.strip():
@@ -298,8 +309,17 @@ class WEB_SEARCH:
                 "parsed_query": parsed_query_dict
             }
 
-        # 5. Generate the final response using the main LLM
+        # 5. Generate the final response
+        step_start_time = time.time()
         final_response = self._invoke_llm(user_query, context, output_format)
+        timings['5_synthesize_answer'] = time.time() - step_start_time
+        
+        timings['total_execution_time'] = time.time() - total_start_time
+        
+        print("\n--- Performance Timings ---")
+        for step, duration in timings.items():
+            print(f"- {step.replace('_', ' ').capitalize()}: {duration:.2f} seconds")
+        print("---------------------------\n")
 
         # 6. Structure and return the final output
         final_output = {
@@ -307,6 +327,7 @@ class WEB_SEARCH:
             "parsed_query": parsed_query_dict,
             "final_response": final_response,
             "sources_used": sources_used,
+            "performance_timings_seconds": {k: round(v, 2) for k, v in timings.items()},
             "top_ranked_results_for_review": ranked_results[:top_n_to_scrape]
         }
         
@@ -315,32 +336,26 @@ class WEB_SEARCH:
 
 # --- Example Usage ---
 if __name__ == "__main__":
-    # Load environment variables from .env file
-    load_dotenv()
-    google_api_key = os.getenv("GOOGLE_API_KEY")
+    # Initialize the agent
+    search_agent = WEB_SEARCH()
 
-    if not google_api_key:
-        print("Error: GOOGLE_API_KEY not found. Please set it in your .env file.")
-    else:
-        # Initialize the agent
-        search_agent = WEB_SEARCH(api_key=google_api_key)
+    # --- Test Queries ---
+    # Query 1: Simple fact-finding
+    # user_input = "What were the key findings of the latest IPCC report on climate change?"
+    
+    # Query 2: Creative, formatted output
+    user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
+    
+    # Query 3: Summarization
+    # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
 
-        # --- Test Queries ---
-        # Query 1: Simple fact-finding
-        # user_input = "What were the key findings of the latest IPCC report on climate change?"
-        
-        # Query 2: Creative, formatted output
-        user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
-        
-        # Query 3: Summarization
-        # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
+    print(f"\n--- Starting Web Search Agent for query: '{user_input}' ---\n")
+    
+    # Run the agent
+    final_result = search_agent.ALL_Action(user_input)
 
-        print(f"\n--- Starting Web Search Agent for query: '{user_input}' ---\n")
-        
-        # Run the agent
-        final_result = search_agent.ALL_Action(user_input)
+    print("\n--- Final Agent Output ---\n")
+    # Pretty-print the JSON output
+    print(json.dumps(final_result, indent=2))
+    print("\n--- End of Report ---\n")
 
-        print("\n--- Final Agent Output ---\n")
-        # Pretty-print the JSON output
-        print(json.dumps(final_result, indent=2))
-        print("\n--- End of Report ---\n")
