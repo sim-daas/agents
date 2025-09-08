@@ -168,16 +168,21 @@ class WEB_SEARCH:
             str: The extracted text content, or an empty string if scraping fails.
         """
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            for script_or_style in soup(['script', 'style', 'nav', 'footer', 'header']):
-                script_or_style.decompose()
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+            # Use a session object for potential connection pooling
+            with requests.Session() as session:
+                response = session.get(url, headers=headers, timeout=5, stream=True)
+                response.raise_for_status()
+
+                # Read only a limited amount of content to avoid downloading large files
+                content = response.raw.read(500 * 1024, decode_content=True)
+
+            # Use lxml for faster parsing
+            soup = BeautifulSoup(content, 'lxml')
+
+            # Remove script, style, and other non-visible elements
+            for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form']):
+                element.decompose()
 
             text_chunks = [p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'article', 'div'])]
             full_text = ' '.join(text_chunks).strip()
@@ -189,8 +194,8 @@ class WEB_SEARCH:
             if len(words) > 200:
                 return ' '.join(words[:200]) + "..."
             
-            return cleaned_text
-        except (requests.RequestException, Exception) as e:
+            return ' '.join(words)
+        except (requests.RequestException, UnicodeDecodeError, AttributeError) as e:            
             return ""
 
     def _invoke_llm(self, original_query: str, context: str, output_format: str) -> str:
