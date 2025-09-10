@@ -26,14 +26,14 @@ embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # Parser LLM for structured data extraction (low temperature)
 parser_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     google_api_key=google_api_key,
     temperature=0.0,
 )
 
 # Main LLM for synthesis and creative tasks (higher temperature)
 main_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     google_api_key=google_api_key,
     temperature=0.7,
 )
@@ -66,6 +66,8 @@ class WEB_SEARCH:
             dict: A dictionary with 'search_query' and 'output_format'.
         """
         print("1. Parsing user query...")
+        
+        
         prompt_text = """
         You are a highly efficient query parsing assistant. Your task is to analyze the user's request and break it down into a concise "search_query" for a web search engine and an "output_format" instruction for another AI.
 
@@ -86,6 +88,7 @@ class WEB_SEARCH:
 
         User Request: "{user_query}"
         """
+
 
         parser_prompt = PromptTemplate(
             template=prompt_text,
@@ -108,7 +111,7 @@ class WEB_SEARCH:
                 'output_format': 'a concise summary'
             }
 
-    def _fetch_search_results(self, search_query: str, max_results: int = 5) -> list:
+    def _fetch_search_results(self, search_query: str, max_results: int = 20) -> list:
         """
         Fetches web search results using DuckDuckGo.
 
@@ -323,7 +326,7 @@ class WEB_SEARCH:
         # 4. Scrape top N results
         step_start_time = time.time()
         print("4. Scraping content from top 3 ranked websites...")
-        top_n_to_scrape = 3
+        top_n_to_scrape = 5
         urls_to_scrape = [
             result.get('href') for result in ranked_results[:top_n_to_scrape] if result.get('href')
         ]
@@ -378,7 +381,8 @@ if __name__ == "__main__":
     
     # Query 2: Creative, formatted output
     # user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
-    user_input = "write a blog on ai agents with keywords optimized for SEO"
+    # user_input = "write a blog on ai agents with keywords optimized for SEO"
+    user_input = "give me judgments on the authority of court to pass order that is preventive in nature and preserve status quo ante"
     
     # Query 3: Summarization
     # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
