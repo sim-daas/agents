@@ -1,4 +1,7 @@
 import aiohttp
+import logging
+import random
+from urllib.parse import urljoin, urlparse
 import asyncio
 import os
 import json
@@ -161,81 +164,272 @@ class WEB_SEARCH:
         ranked_results = sorted(results, key=lambda x: x.get('similarity', 0), reverse=True)
         print("   - Ranking complete.")
         return ranked_results
-        
+       
+       
     async def _scrape_websites_content_async(self, urls: list) -> tuple:
         """
-        Scrapes the main text content from a list of URLs concurrently, limited to 200 words each.
+        Scrapes the main text content from prioritized URLs with robust error handling.
+        Only scrapes top 5 URLs, with fallback to lower-ranking URLs on failures.
 
         Args:
-            urls (list): List of URLs to scrape.
+            urls (list): List of URLs ordered by priority (highest to lowest)
 
         Returns:
             tuple: (context_parts, sources_used)
-                   context_parts is a list of extracted text content strings,
-                   sources_used is a list of URLs that were successfully scraped.
         """
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        
+        # Setup logging if not already configured
+        logger = logging.getLogger('web_scraper')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
 
-        async def fetch_and_parse(session, url):
-            """Fetch and parse a single URL"""
+        if not urls:
+            logger.warning("No URLs provided for scraping")
+            return [], []
+
+        # Separate active URLs (top 5) and reserve URLs for fallback
+        active_urls = urls[:5]
+        reserve_urls = urls[5:] if len(urls) > 5 else []
+        
+        logger.info(f"Starting scrape with {len(active_urls)} active URLs, {len(reserve_urls)} reserve URLs")
+
+        def get_random_headers():
+            """Get randomized headers to avoid detection"""
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/121.0'
+            ]
+            
+            return {
+                'User-Agent': random.choice(user_agents),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+
+        def exponential_backoff(attempt: int) -> float:
+            """Calculate exponential backoff delay with jitter"""
+            base_delay = 1.0
+            delay = base_delay * (2 ** attempt)
+            jitter = random.uniform(0.1, 0.5) * delay
+            return min(delay + jitter, 30)  # Cap at 30 seconds
+
+        def handle_redirect(response, original_url: str) -> str:
+            """Handle HTTP redirects properly"""
             try:
-                async with session.get(url, timeout=5) as response:
-                    response.raise_for_status()
-                    # Read content with size limit
-                    content = await response.read()
-                    if len(content) > 500 * 1024:  # Limit to 500KB
-                        content = content[:500 * 1024]
+                location = response.headers.get('Location', '')
+                if location:
+                    if location.startswith('/'):
+                        parsed_url = urlparse(original_url)
+                        return f"{parsed_url.scheme}://{parsed_url.netloc}{location}"
+                    elif not location.startswith('http'):
+                        return urljoin(original_url, location)
+                    return location
+            except Exception as e:
+                logger.error(f"Redirect handling error: {str(e)}")
+            return None
 
-                # Parse with BeautifulSoup and lxml
-                soup = BeautifulSoup(content, 'lxml')
-                
-                # Remove non-visible elements
-                for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form']):
-                    element.decompose()
+        async def fetch_and_parse_robust(session, url, max_retries=3):
+            """Fetch and parse a single URL with comprehensive error handling"""
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    logger.debug(f"Attempt {attempt + 1} for {url}")
+                    
+                    async with session.get(url, allow_redirects=False) as response:
+                        
+                        # Handle different HTTP status codes
+                        if response.status == 200:
+                            # Read content with size limit
+                            content = await response.read()
+                            if len(content) > 500 * 1024:  # 1MB limit
+                                content = content[:500 * 1024]
+                                logger.warning(f"Content truncated due to size: {url}")
 
-                # Extract text
-                text_chunks = [p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'article', 'div'])]
-                full_text = ' '.join(text_chunks).strip()
-                cleaned_text = ' '.join(full_text.split())
+                            # Parse with BeautifulSoup and lxml
+                            soup = BeautifulSoup(content, 'lxml')
+                            
+                            # Remove non-visible elements
+                            for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form', 'iframe', 'noscript']):
+                                element.decompose()
 
-                # Truncate to 200 words
-                words = cleaned_text.split()
-                if len(words) > 200:
-                    extracted_text = ' '.join(words[:200]) + "..."
-                else:
-                    extracted_text = ' '.join(words)
+                            # Extract meaningful text
+                            text_chunks = []
+                            for tag in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'article', 'div', 'span']):
+                                text = tag.get_text(strip=True)
+                                if text and len(text) > 20:  # Filter short snippets
+                                    text_chunks.append(text)
 
-                return url, extracted_text
+                            if not text_chunks:
+                                logger.warning(f"No meaningful content extracted from {url}")
+                                return url, ""
 
-            except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeDecodeError, AttributeError) as e:
-                print(f"   - Failed to scrape {url}: {str(e)}")
-                return url, ""
+                            full_text = ' '.join(text_chunks).strip()
+                            cleaned_text = ' '.join(full_text.split())
+
+                            # Truncate to 200 words
+                            words = cleaned_text.split()
+                            if len(words) > 200:
+                                extracted_text = ' '.join(words[:200]) + "..."
+                            else:
+                                extracted_text = ' '.join(words)
+
+                            logger.info(f"Successfully scraped: {url}")
+                            return url, extracted_text
+                        
+                        elif response.status == 204:
+                            logger.warning(f"Empty content (204) from {url}")
+                            return url, ""  # Will trigger fallback
+                        
+                        elif response.status in [301, 302, 303, 307, 308]:
+                            redirect_url = handle_redirect(response, url)
+                            if redirect_url and redirect_url != url:
+                                logger.info(f"Following redirect: {url} -> {redirect_url}")
+                                return await fetch_and_parse_robust(session, redirect_url, max_retries - attempt)
+                            else:
+                                logger.error(f"Invalid redirect from {url}")
+                                return url, ""
+                        
+                        elif response.status == 403:
+                            logger.warning(f"Access forbidden (403) for {url}")
+                            return url, ""  # Will trigger fallback
+                        
+                        elif response.status == 429:
+                            if attempt < max_retries:
+                                # Check for Retry-After header
+                                retry_after = response.headers.get('Retry-After')
+                                if retry_after:
+                                    try:
+                                        delay = min(float(retry_after), 60)
+                                    except ValueError:
+                                        delay = exponential_backoff(attempt) * 2
+                                else:
+                                    delay = exponential_backoff(attempt) * 2
+                                
+                                logger.warning(f"Rate limited (429) for {url}, retrying in {delay}s")
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                logger.error(f"Rate limit exceeded for {url}, exhausted retries")
+                                return url, ""
+                        
+                        elif response.status >= 500:
+                            if attempt < max_retries:
+                                delay = exponential_backoff(attempt)
+                                logger.warning(f"Server error ({response.status}) for {url}, retrying in {delay}s")
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                logger.error(f"Server error ({response.status}) for {url}, exhausted retries")
+                                return url, ""
+                        
+                        else:
+                            logger.error(f"Unhandled status code {response.status} for {url}")
+                            return url, ""
+
+                except aiohttp.ClientConnectorError as e:
+                    logger.error(f"Connection error for {url}: {str(e)}")
+                    if attempt < max_retries:
+                        delay = exponential_backoff(attempt)
+                        await asyncio.sleep(delay)
+                        continue
+                    return url, ""
+
+                except aiohttp.ClientTimeout as e:
+                    logger.warning(f"Timeout for {url}: {str(e)}")
+                    if attempt < max_retries:
+                        delay = exponential_backoff(attempt)
+                        await asyncio.sleep(delay)
+                        continue
+                    return url, ""
+
+                except (UnicodeDecodeError, AttributeError) as e:
+                    logger.error(f"Content processing error for {url}: {str(e)}")
+                    return url, ""
+
+                except Exception as e:
+                    logger.error(f"Unexpected error for {url}: {str(e)}")
+                    return url, ""
+
+            return url, ""
 
         context_parts = []
         sources_used = []
+        failed_count = 0
 
-        # Create aiohttp session and fetch all URLs concurrently
-        timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout
-        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            # Create tasks for all URLs
-            tasks = [fetch_and_parse(session, url) for url in urls]
+        # Enhanced timeout and connection settings
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        connector = aiohttp.TCPConnector(limit=10, limit_per_host=3)
+        
+        async with aiohttp.ClientSession(
+            headers=get_random_headers(), 
+            timeout=timeout,
+            connector=connector
+        ) as session:
             
-            # Execute all tasks concurrently
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Process active URLs with fallback mechanism
+            for i, url in enumerate(active_urls):
+                success = False
+                
+                # Try current URL
+                result_url, content = await fetch_and_parse_robust(session, url)
+                
+                if content:  # Success
+                    context_parts.append(f"Content from {result_url}:\n{content}")
+                    sources_used.append(result_url)
+                    success = True
+                else:
+                    failed_count += 1
+                    logger.warning(f"Failed to scrape primary URL: {url}")
+                    
+                    # Try fallback from reserve URLs
+                    if reserve_urls:
+                        fallback_url = reserve_urls.pop(0)
+                        logger.info(f"Trying fallback URL: {fallback_url}")
+                        
+                        fallback_result_url, fallback_content = await fetch_and_parse_robust(session, fallback_url)
+                        if fallback_content:
+                            context_parts.append(f"Content from {fallback_result_url}:\n{fallback_content}")
+                            sources_used.append(fallback_result_url)
+                            success = True
+                            logger.info(f"Fallback successful: {fallback_result_url}")
+                
+                if not success:
+                    logger.error(f"Failed to get content for position {i+1}")
 
-        # Process results
-        for result in results:
-            if isinstance(result, Exception):
-                continue
+        # Validate scraped data completeness
+        if not context_parts:
+            logger.error("No content was successfully scraped")
+        # else:
+        #     # Check content quality
+        #     valid_content_count = 0
+        #     for i, content in enumerate(context_parts):
+        #         if len(content.split()) >= 25:  # At least 25 words including metadata
+        #             valid_content_count += 1
+        #         else:
+        #             logger.warning(f"Low quality content from {sources_used[i]}")
             
-            url, content = result
-            if content:  # Only add if content was successfully extracted
-                context_parts.append(f"Content from {url}:\n{content}")
-                sources_used.append(url)
+        #     success_rate = ((len(sources_used)) / len(active_urls)) * 100
+        #     logger.info(f"Scraping completed: {len(sources_used)}/{len(active_urls)} successful ({success_rate:.1f}%)")
+        #     logger.info(f"Quality content: {valid_content_count}/{len(context_parts)} sources")
+            
+        #     if success_rate < 60:
+        #         logger.warning("Low success rate - consider reviewing URL quality or network conditions")
 
         return context_parts, sources_used
+ 
+       
+        
 
     def _invoke_llm(self, original_query: str, context: str, output_format: str) -> str:
         """
@@ -328,7 +522,7 @@ class WEB_SEARCH:
         print("4. Scraping content from top 3 ranked websites...")
         top_n_to_scrape = 5
         urls_to_scrape = [
-            result.get('href') for result in ranked_results[:top_n_to_scrape] if result.get('href')
+            result.get('href') for result in ranked_results[:] if result.get('href')
         ]
         
         context_parts, sources_used = asyncio.run(self._scrape_websites_content_async(urls_to_scrape))
@@ -382,7 +576,7 @@ if __name__ == "__main__":
     # Query 2: Creative, formatted output
     # user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
     # user_input = "write a blog on ai agents with keywords optimized for SEO"
-    user_input = "give me judgments on the authority of court to pass order that is preventive in nature and preserve status quo ante"
+    user_input = "what is the authority of court to pass order that is preventive in nature and preserve status quo ante"
     
     # Query 3: Summarization
     # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
