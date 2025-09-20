@@ -475,7 +475,7 @@ class WEB_SEARCH:
         print("   - Synthesis complete.")
         return response.content
 
-    def ALL_Action(self, user_query: str) -> dict:
+    def ALL_Action(self, user_query: str) -> str:
         """
         The main public method that orchestrates the entire process from
         query parsing to final answer generation.
@@ -484,79 +484,32 @@ class WEB_SEARCH:
             user_query (str): The user's natural language query.
 
         Returns:
-            dict: A structured dictionary containing the final response and metadata.
+            str: The final response from the LLM.
         """
-        total_start_time = time.time()
-        timings = {}
-
-        # 1. Parse the user query
-        step_start_time = time.time()
+        print("Parsing query...")
         parsed_query_dict = self._parse_user_query(user_query)
-        timings['1_parse_query'] = time.time() - step_start_time
-
         if not parsed_query_dict or 'search_query' not in parsed_query_dict:
-            return {
-                "error": "Failed to parse the user query.",
-                "final_response": None,
-                "sources_used": []
-            }
+            return "Error: Failed to parse the user query."
         search_query = parsed_query_dict['search_query']
         output_format = parsed_query_dict['output_format']
 
-        # 2. Fetch search results
-        step_start_time = time.time()
+        print("Fetching search results...")
         results = self._fetch_search_results(search_query)
-        timings['2_fetch_results'] = time.time() - step_start_time
 
-        # 3. Rank results
-        step_start_time = time.time()
+        print("Ranking results...")
         ranked_results = self._rank_results_by_similarity(search_query, results)
-        timings['3_rank_results'] = time.time() - step_start_time
 
-        # 4. Scrape top N results
-        step_start_time = time.time()
-        print("4. Scraping content from top 5 ranked websites...")
-        top_n_to_scrape = 5
-        urls_to_scrape = [result['href'] for result in ranked_results[:] if 'href' in result]
-        
+        print("Scraping content from top ranked websites...")
+        urls_to_scrape = [result['href'] for result in ranked_results if 'href' in result]
         context_parts, sources_used = asyncio.run(self._scrape_websites_content_async(urls_to_scrape))
-        
-        timings['4_scrape_content'] = time.time() - step_start_time
         context = "\n\n---\n\n".join(context_parts)
-        
         if not context.strip():
-            print("   - Error: No content could be scraped from the top results.")
-            return {
-                "error": "Could not retrieve content from any of the top search results.",
-                "final_response": None,
-                "sources_used": [],
-                "parsed_query": parsed_query_dict
-            }
+            return "Error: Could not retrieve content from any of the top search results."
 
-        # 5. Generate the final response
-        step_start_time = time.time()
+        print("Synthesizing final answer...")
         final_response = self._invoke_llm(user_query, context, output_format)
-        timings['5_synthesize_answer'] = time.time() - step_start_time
-        
-        timings['total_execution_time'] = time.time() - total_start_time
-        
-        print("\n--- Performance Timings ---")
-        for step, duration in timings.items():
-            print(f"- {step.replace('_', ' ').capitalize()}: {duration:.2f} seconds")
-        print("---------------------------\n")
-
-        # 6. Structure and return the final output
-        final_output = {
-            "user_query": user_query,
-            "parsed_query": parsed_query_dict,
-            "final_response": final_response,
-            "sources_used": sources_used,
-            "performance_timings_seconds": {k: round(v, 2) for k, v in timings.items()},
-            "top_ranked_results_for_review": ranked_results[:top_n_to_scrape]
-        }
-        
-        print("\nProcess finished successfully!")
-        return final_output
+        print(final_response)
+        return final_response
 
 # --- Example Usage ---
 if __name__ == "__main__":
