@@ -259,7 +259,7 @@ class WEB_SEARCH:
                 try:
                     logger.debug(f"Attempt {attempt + 1} for {url}")
                     
-                    async with session.get(url, allow_redirects=False) as response:
+                    async with session.get(url, allow_redirects=False, ssl=False) as response:
                         
                         # Handle different HTTP status codes
                         if response.status == 200:
@@ -421,21 +421,6 @@ class WEB_SEARCH:
         # Validate scraped data completeness
         if not context_parts:
             logger.error("No content was successfully scraped")
-        # else:
-        #     # Check content quality
-        #     valid_content_count = 0
-        #     for i, content in enumerate(context_parts):
-        #         if len(content.split()) >= 25:  # At least 25 words including metadata
-        #             valid_content_count += 1
-        #         else:
-        #             logger.warning(f"Low quality content from {sources_used[i]}")
-            
-        #     success_rate = ((len(sources_used)) / len(active_urls)) * 100
-        #     logger.info(f"Scraping completed: {len(sources_used)}/{len(active_urls)} successful ({success_rate:.1f}%)")
-        #     logger.info(f"Quality content: {valid_content_count}/{len(context_parts)} sources")
-            
-        #     if success_rate < 60:
-        #         logger.warning("Low success rate - consider reviewing URL quality or network conditions")
 
         return context_parts, sources_used
  
