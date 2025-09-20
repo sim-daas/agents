@@ -1,4 +1,6 @@
 import aiohttp
+from duckpy import Client
+import urllib.parse
 import logging
 import random
 from urllib.parse import urljoin, urlparse
@@ -29,14 +31,14 @@ embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # Parser LLM for structured data extraction (low temperature)
 parser_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     google_api_key=google_api_key,
     temperature=0.0,
 )
 
 # Main LLM for synthesis and creative tasks (higher temperature)
 main_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     google_api_key=google_api_key,
     temperature=0.7,
 )
@@ -114,26 +116,37 @@ class WEB_SEARCH:
                 'output_format': 'a concise summary'
             }
 
+
     def _fetch_search_results(self, search_query: str, max_results: int = 20) -> list:
         """
-        Fetches web search results using DuckDuckGo.
-
+        Fetches web search results using DuckDuckGo via duckpy.
         Args:
             search_query (str): The query to search for.
             max_results (int): The maximum number of results to fetch.
-
         Returns:
             list: A list of search result dictionaries.
         """
         print(f"2. Fetching top {max_results} web results for: '{search_query}'...")
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(search_query, max_results=max_results))
-            print(f"   - Found {len(results)} results.")
-            return results
+            
+            client = Client()
+            results = client.search(search_query)
+            
+            # Convert result objects to dictionaries and limit results
+            formatted_results = []
+            for result in results[:max_results]:
+                formatted_results.append({
+                    'title': result.title,
+                    'href': result.url,  # duckduckgo-search uses 'href', duckpy uses 'url'
+                    'body': result.description  # duckduckgo-search uses 'body', duckpy uses 'description'
+                })
+            
+            print(f"   - Found {len(formatted_results)} results.")
+            return formatted_results
         except Exception as e:
             print(f"   - Error fetching search results: {e}")
             return []
+
 
     def _rank_results_by_similarity(self, search_query: str, results: list) -> list:
         """
@@ -239,7 +252,7 @@ class WEB_SEARCH:
                 logger.error(f"Redirect handling error: {str(e)}")
             return None
 
-        async def fetch_and_parse_robust(session, url, max_retries=3):
+        async def fetch_and_parse_robust(session, url, max_retries=1):
             """Fetch and parse a single URL with comprehensive error handling"""
             
             for attempt in range(max_retries + 1):
@@ -252,8 +265,8 @@ class WEB_SEARCH:
                         if response.status == 200:
                             # Read content with size limit
                             content = await response.read()
-                            if len(content) > 500 * 1024:  # 1MB limit
-                                content = content[:500 * 1024]
+                            if len(content) > 150 * 1024:  # 1MB limit
+                                content = content[:150 * 1024]
                                 logger.warning(f"Content truncated due to size: {url}")
 
                             # Parse with BeautifulSoup and lxml
@@ -265,10 +278,7 @@ class WEB_SEARCH:
 
                             # Extract meaningful text
                             text_chunks = []
-                            for tag in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'article', 'div', 'span']):
-                                text = tag.get_text(strip=True)
-                                if text and len(text) > 20:  # Filter short snippets
-                                    text_chunks.append(text)
+                            text_chunks = [p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'article', 'div'])]
 
                             if not text_chunks:
                                 logger.warning(f"No meaningful content extracted from {url}")
@@ -292,13 +302,16 @@ class WEB_SEARCH:
                             return url, ""  # Will trigger fallback
                         
                         elif response.status in [301, 302, 303, 307, 308]:
-                            redirect_url = handle_redirect(response, url)
-                            if redirect_url and redirect_url != url:
-                                logger.info(f"Following redirect: {url} -> {redirect_url}")
-                                return await fetch_and_parse_robust(session, redirect_url, max_retries - attempt)
-                            else:
-                                logger.error(f"Invalid redirect from {url}")
-                                return url, ""
+                            logger.warning(f"Redirect ({response.status}) for {url} - not following redirects")
+                            return url, ""  # Will trigger fallback
+                        
+                            # redirect_url = handle_redirect(response, url)
+                            # if redirect_url and redirect_url != url:
+                            #     logger.info(f"Following redirect: {url} -> {redirect_url}")
+                            #     return await fetch_and_parse_robust(session, redirect_url, max_retries - attempt)
+                            # else:
+                            #     logger.error(f"Invalid redirect from {url}")
+                            #     return url, ""
                         
                         elif response.status == 403:
                             logger.warning(f"Access forbidden (403) for {url}")
@@ -345,7 +358,7 @@ class WEB_SEARCH:
                         continue
                     return url, ""
 
-                except aiohttp.ClientTimeout as e:
+                except asyncio.TimeoutError as e:
                     logger.warning(f"Timeout for {url}: {str(e)}")
                     if attempt < max_retries:
                         delay = exponential_backoff(attempt)
@@ -368,13 +381,11 @@ class WEB_SEARCH:
         failed_count = 0
 
         # Enhanced timeout and connection settings
-        timeout = aiohttp.ClientTimeout(total=30, connect=10)
-        connector = aiohttp.TCPConnector(limit=10, limit_per_host=3)
+        timeout = aiohttp.ClientTimeout(total=10, connect=5)
         
         async with aiohttp.ClientSession(
             headers=get_random_headers(), 
             timeout=timeout,
-            connector=connector
         ) as session:
             
             # Process active URLs with fallback mechanism
@@ -519,11 +530,9 @@ class WEB_SEARCH:
 
         # 4. Scrape top N results
         step_start_time = time.time()
-        print("4. Scraping content from top 3 ranked websites...")
+        print("4. Scraping content from top 5 ranked websites...")
         top_n_to_scrape = 5
-        urls_to_scrape = [
-            result.get('href') for result in ranked_results[:] if result.get('href')
-        ]
+        urls_to_scrape = [result['href'] for result in ranked_results[:] if 'href' in result]
         
         context_parts, sources_used = asyncio.run(self._scrape_websites_content_async(urls_to_scrape))
         
@@ -576,7 +585,7 @@ if __name__ == "__main__":
     # Query 2: Creative, formatted output
     # user_input = "Write a short blog post about the benefits of using Python for data science, aimed at beginners."
     # user_input = "write a blog on ai agents with keywords optimized for SEO"
-    user_input = "what is the authority of court to pass order that is preventive in nature and preserve status quo ante"
+    user_input = "give me judgments on the authority of court to pass order that is preventive in nature and preserve status quo ante"
     
     # Query 3: Summarization
     # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
