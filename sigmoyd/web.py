@@ -1,14 +1,10 @@
 import aiohttp
 from duckpy import Client
-import urllib.parse
-import logging
 import random
 from urllib.parse import urljoin, urlparse
 import asyncio
 import os
 import json
-import time
-import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from ddgs import DDGS
@@ -26,7 +22,6 @@ if not google_api_key:
     raise ValueError("GOOGLE_API_KEY not found. Please set it in your .env file.")
 
 # Initialize models outside the class as requested, so they are loaded only once.
-print("Initializing models...")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # Parser LLM for structured data extraction (low temperature)
@@ -42,7 +37,6 @@ main_llm = ChatGoogleGenerativeAI(
     google_api_key=google_api_key,
     temperature=0.7,
 )
-print("Models initialized.")
 
 
 class WEB_SEARCH:
@@ -70,9 +64,6 @@ class WEB_SEARCH:
         Returns:
             dict: A dictionary with 'search_query' and 'output_format'.
         """
-        print("1. Parsing user query...")
-        
-        
         prompt_text = """
         You are a highly efficient query parsing assistant. Your task is to analyze the user's request and break it down into a concise "search_query" for a web search engine and an "output_format" instruction for another AI.
 
@@ -107,10 +98,8 @@ class WEB_SEARCH:
             llm_response = llm_chain.invoke({'user_query': user_query})
             cleaned_response = llm_response.content.strip().replace('```json', '').replace('```', '').strip()
             parsed_json = json.loads(cleaned_response)
-            print(f"   - Successfully parsed query: {parsed_json}")
             return parsed_json
         except (json.JSONDecodeError, KeyError, AttributeError) as e:
-            print(f"   - Warning: Failed to parse LLM response ({e}). Using default.")
             return {
                 'search_query': user_query,
                 'output_format': 'a concise summary'
@@ -126,7 +115,6 @@ class WEB_SEARCH:
         Returns:
             list: A list of search result dictionaries.
         """
-        print(f"2. Fetching top {max_results} web results for: '{search_query}'...")
         try:
             
             client = Client()
@@ -141,10 +129,8 @@ class WEB_SEARCH:
                     'body': result.description  # duckduckgo-search uses 'body', duckpy uses 'description'
                 })
             
-            print(f"   - Found {len(formatted_results)} results.")
             return formatted_results
         except Exception as e:
-            print(f"   - Error fetching search results: {e}")
             return []
 
 
@@ -160,7 +146,6 @@ class WEB_SEARCH:
         Returns:
             list: A sorted list of results with an added 'similarity' score.
         """
-        print("3. Ranking results by semantic similarity...")
         if not results:
             return []
             
@@ -175,7 +160,6 @@ class WEB_SEARCH:
             result['similarity'] = cosine_scores[0][i].item()
             
         ranked_results = sorted(results, key=lambda x: x.get('similarity', 0), reverse=True)
-        print("   - Ranking complete.")
         return ranked_results
        
        
@@ -439,8 +423,6 @@ class WEB_SEARCH:
         Returns:
             str: The final, synthesized response from the LLM.
         """
-        print("5. Synthesizing final answer with main LLM...")
-        
         prompt_text = """
         You are an expert research assistant. Your task is to provide a comprehensive and well-structured answer to the user's query based *only* on the provided context from web search results. Do not use any prior knowledge.
 
@@ -472,7 +454,6 @@ class WEB_SEARCH:
             'output_format': output_format
         })
         
-        print("   - Synthesis complete.")
         return response.content
 
     def ALL_Action(self, user_query: str) -> str:
@@ -486,29 +467,21 @@ class WEB_SEARCH:
         Returns:
             str: The final response from the LLM.
         """
-        print("Parsing query...")
         parsed_query_dict = self._parse_user_query(user_query)
         if not parsed_query_dict or 'search_query' not in parsed_query_dict:
             return "Error: Failed to parse the user query."
         search_query = parsed_query_dict['search_query']
         output_format = parsed_query_dict['output_format']
 
-        print("Fetching search results...")
         results = self._fetch_search_results(search_query)
-
-        print("Ranking results...")
         ranked_results = self._rank_results_by_similarity(search_query, results)
-
-        print("Scraping content from top ranked websites...")
         urls_to_scrape = [result['href'] for result in ranked_results if 'href' in result]
         context_parts, sources_used = asyncio.run(self._scrape_websites_content_async(urls_to_scrape))
         context = "\n\n---\n\n".join(context_parts)
         if not context.strip():
             return "Error: Could not retrieve content from any of the top search results."
 
-        print("Synthesizing final answer...")
         final_response = self._invoke_llm(user_query, context, output_format)
-        print(final_response)
         return final_response
 
 # --- Example Usage ---
@@ -528,13 +501,9 @@ if __name__ == "__main__":
     # Query 3: Summarization
     # user_input = "What are the latest developments in quantum computing? Give me a 3-point summary."
 
-    print(f"\n--- Starting Web Search Agent for query: '{user_input}' ---\n")
-    
     # Run the agent
     final_result = search_agent.ALL_Action(user_input)
 
-    print("\n--- Final Agent Output ---\n")
-    # Pretty-print the JSON output
-    print(json.dumps(final_result, indent=2))
-    print("\n--- End of Report ---\n")
+    # Print the final response
+    print(final_result)
 
