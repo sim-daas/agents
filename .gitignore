@@ -1,2 +1,5 @@
 sigmoyd/sheet.py
 .env
+sigmoyd/linkedin/.cache
+sigmoyd/linkedin/.dbus
+sigmoyd/linkedin/.config
