@@ -3,3 +3,4 @@ sigmoyd/sheet.py
 sigmoyd/linkedin/.cache
 sigmoyd/linkedin/.dbus
 sigmoyd/linkedin/.config
+sigmoyd/linkedin/.local
