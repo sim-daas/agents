@@ -4,3 +4,10 @@ sigmoyd/linkedin/.cache
 sigmoyd/linkedin/.dbus
 sigmoyd/linkedin/.config
 sigmoyd/linkedin/.local
+.*/
+sigmoyd/linkedin/.*
+sigmoyd/linkedin/.*/
+.vscode/
+.*
+!.gitignore
+sigmoyd/linkedin/.bash_history
