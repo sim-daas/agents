@@ -20,13 +20,13 @@ RUN apt-get update && \
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed selenium requests beautifulsoup4 websockify
 
 # Create non-root user with password
-RUN useradd -m -s /bin/bash -G sudo scraper && \
-    echo "scraper:312" | chpasswd
+RUN useradd -m -s /bin/bash -G sudo admin && \
+    echo "admin:312" | chpasswd
 
 # Set up VNC password for the user
-RUN mkdir -p /home/scraper/.vnc && \
-    echo "312" | x11vnc -storepasswd - /home/scraper/.vnc/passwd && \
-    chown -R scraper:scraper /home/scraper/.vnc
+RUN mkdir -p /home/admin/.vnc && \
+    echo "312" | x11vnc -storepasswd - /home/admin/.vnc/passwd && \
+    chown -R admin:admin /home/admin/.vnc
 
 # Download and install noVNC
 RUN mkdir -p /opt/novnc && \
@@ -40,8 +40,8 @@ EXPOSE 5900 6080
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Switch to scraper user
-USER scraper
-WORKDIR /home/scraper
+# Switch to admin user
+USER admin
+WORKDIR /home/admin
 
 ENTRYPOINT ["/start.sh"]

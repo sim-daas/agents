@@ -4,11 +4,11 @@ Xvfb :0 -screen 0 1920x1080x24 &
 export DISPLAY=:0
 sleep 2
 
-# Start XFCE as the scraper user
-su - scraper -c "export DISPLAY=:0 && /usr/bin/xfwm4 &"
+# Start XFCE as the admin user
+su - admin -c "export DISPLAY=:0 && /usr/bin/xfwm4 &"
 sleep 1
 
-su - scraper -c "export DISPLAY=:0 && /usr/bin/xfce4-panel &"
+su - admin -c "export DISPLAY=:0 && /usr/bin/xfce4-panel &"
 sleep 1
 
 # Start x11vnc server with password
