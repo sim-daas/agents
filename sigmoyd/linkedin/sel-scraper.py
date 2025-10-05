@@ -14,7 +14,6 @@ job_title = "python"
 # Set up Firefox driver
 with webdriver.Firefox() as driver:
     driver.get(f"https://www.linkedin.com")
-    # Load cookies from file
     with open('/home/admin/agents/sigmoyd/linkedin/linkedin_cookies.pkl', 'rb') as f:
         cookies = pickle.load(f)
     for cookie in cookies:
