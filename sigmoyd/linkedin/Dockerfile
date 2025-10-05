@@ -17,7 +17,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Selenium and other Python dependencies
-RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed selenium requests beautifulsoup4 websockify
+RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed selenium requests beautifulsoup4 websockify fastapi uvicorn
 
 # Create non-root user with password
 RUN useradd -m -s /bin/bash -G sudo admin && \
