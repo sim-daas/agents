@@ -8,7 +8,7 @@ sleep 2
 export DISPLAY=:0 && /usr/bin/xfwm4 &
 sleep 1
 
-export DISPLAY=:0 && /usr/bin/xfce4-panel
+export DISPLAY=:0 && /usr/bin/xfce4-panel &
 sleep 1
 
 # Start x11vnc server with password
@@ -17,4 +17,4 @@ sleep 2
 
 # Start websockify to proxy VNC to web (noVNC)
 echo "Starting websockify with noVNC at: /opt/novnc"
-python3 -m websockify --web=/opt/novnc 6080 localhost:5900
+python3 -m websockify --web=/opt/novnc 6080 localhost:5900 &
