@@ -4,6 +4,7 @@ import uvicorn
 import pickle
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
 import time
 
 app = FastAPI()
@@ -11,8 +12,14 @@ app = FastAPI()
 def scrape_linkedin_posts(search_query: str, quantity: int = 10) -> List[str]:
     job_title = search_query
     to_ret = []
-    with webdriver.Firefox() as driver:
-        driver.get(f"https://www.linkedin.com")
+    firefox_options = Options()
+    firefox_options.add_argument("--headless")
+    firefox_options.add_argument("--no-sandbox")
+    firefox_options.add_argument("--disable-dev-shm-usage")
+    firefox_options.add_argument("--disable-gpu")
+    firefox_options.add_argument("--window-size=1920,1080")
+    with webdriver.Firefox(options=firefox_options) as driver:
+        driver.get("https://www.linkedin.com")
         with open('/home/admin/agents/sigmoyd/linkedin/linkedin_cookies.pkl', 'rb') as f:
             cookies = pickle.load(f)
         for cookie in cookies:
