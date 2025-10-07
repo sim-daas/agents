@@ -26,5 +26,3 @@ chown -R admin:admin /home/admin/.vnc
 mkdir -p /opt/novnc
 wget -qO- https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz | tar xz --strip-components=1 -C /opt/novnc
 ln -sf /opt/novnc/vnc.html /opt/novnc/index.html
-
-git clone https://github.com/sim-daas/agents /home/admin/agents || true
