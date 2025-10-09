@@ -126,9 +126,31 @@ def search_linkedin_companies(name_or_category: str, countries: List[str] = None
 
             if countries or industries:
                 try:
-                    all_filters_button = driver.find_element(By.XPATH, "//button[contains(., 'All filters')]")
-                    driver.execute_script("arguments[0].click();", all_filters_button)
-                    time.sleep(2)
+                    # Try multiple selectors for the All filters button
+                    all_filters_button = None
+                    selectors = [
+                        '//*[@id="search-reusables__filters-bar"]/div/div//button',
+                        '//*[@id="ember124"]',
+                        "//div[@id='search-reusables__filters-bar']//button",
+                        "//button[contains(text(), 'All filters')]",
+                        "//button[contains(., 'All filters')]",
+                        "//button[@aria-label='Show all filters']",
+                        "//button[contains(@class, 'search-filters-bar__filter--all')]",
+                        "//span[contains(text(), 'All filters')]/parent::button"
+                    ]
+                    
+                    for selector in selectors:
+                        try:
+                            all_filters_button = driver.find_element(By.XPATH, selector)
+                            break
+                        except:
+                            continue
+                    
+                    if all_filters_button:
+                        driver.execute_script("arguments[0].click();", all_filters_button)
+                        time.sleep(2)
+                    else:
+                        print("Could not find All filters button, skipping filters")
 
                     if countries:
                         for country in countries:
