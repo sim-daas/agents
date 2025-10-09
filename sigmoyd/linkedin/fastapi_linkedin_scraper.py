@@ -61,7 +61,7 @@ def extract_company_info(link: str) -> str:
     with webdriver.Firefox(options=firefox_options) as driver:
         try:
             driver.get("https://www.linkedin.com")
-            with open('/root/linkedin_cookies.pkl', 'rb') as f:
+            with open('/home/admin/agents/sigmoyd/linkedin/linkedin_cookies.pkl', 'rb') as f:
                 cookies = pickle.load(f)
             for cookie in cookies:
                 cookie.pop('sameSite', None)
@@ -96,7 +96,7 @@ def search_linkedin_companies(name_or_category: str, countries: List[str] = None
     with webdriver.Firefox(options=firefox_options) as driver:
         try:
             driver.get("https://www.linkedin.com")
-            with open('/root/linkedin_cookies.pkl', 'rb') as f:
+            with open('/home/admin/agents/sigmoyd/linkedin/linkedin_cookies.pkl', 'rb') as f:
                 cookies = pickle.load(f)
             for cookie in cookies:
                 cookie.pop('sameSite', None)
