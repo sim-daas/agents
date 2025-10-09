@@ -126,29 +126,51 @@ def search_linkedin_companies(name_or_category: str, countries: List[str] = None
 
             if countries or industries:
                 try:
-                    # Try multiple selectors for the All filters button
+                    # Try multiple methods to find the All filters button using exact selectors
                     all_filters_button = None
-                    selectors = [
-                        '//*[@id="search-reusables__filters-bar"]/div/div//button',
-                        '//*[@id="ember124"]',
-                        "//div[@id='search-reusables__filters-bar']//button",
-                        "//button[contains(text(), 'All filters')]",
-                        "//button[contains(., 'All filters')]",
-                        "//button[@aria-label='Show all filters']",
-                        "//button[contains(@class, 'search-filters-bar__filter--all')]",
-                        "//span[contains(text(), 'All filters')]/parent::button"
-                    ]
                     
-                    for selector in selectors:
+                    # Method 1: Try by exact class selector
+                    try:
+                        all_filters_button = driver.find_element(By.CSS_SELECTOR, "button.search-reusables__all-filters-pill-button")
+                    except:
+                        pass
+                    
+                    # Method 2: Try by aria-label
+                    if not all_filters_button:
                         try:
-                            all_filters_button = driver.find_element(By.XPATH, selector)
-                            break
+                            all_filters_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Show all filters']")
                         except:
-                            continue
+                            pass
+                    
+                    # Method 3: Try by multiple class combination
+                    if not all_filters_button:
+                        try:
+                            all_filters_button = driver.find_element(By.CSS_SELECTOR, "button.artdeco-pill.search-reusables__filter-pill-button")
+                        except:
+                            pass
+                    
+                    # Method 4: Try by ID pattern (ember IDs change but we can try)
+                    if not all_filters_button:
+                        try:
+                            all_filters_button = driver.find_element(By.CSS_SELECTOR, "button[id^='ember'][aria-label*='Show all filters']")
+                        except:
+                            pass
+                    
+                    # Method 5: Try by text content
+                    if not all_filters_button:
+                        try:
+                            buttons = driver.find_elements(By.TAG_NAME, "button")
+                            for button in buttons:
+                                if "All filters" in button.text:
+                                    all_filters_button = button
+                                    break
+                        except:
+                            pass
                     
                     if all_filters_button:
                         driver.execute_script("arguments[0].click();", all_filters_button)
-                        time.sleep(2)
+                        time.sleep(3)
+                        print("Successfully clicked All filters button")
                     else:
                         print("Could not find All filters button, skipping filters")
 
